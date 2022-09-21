@@ -172,7 +172,7 @@ func (s *MyServer) WaitShutdown() {
 	log.Printf("Stoping http server ...")
 
 	//Create shutdown context with 10 second timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
 	//shutdown the server
