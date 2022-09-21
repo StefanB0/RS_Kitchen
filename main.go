@@ -1,93 +1,88 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
-	"restaurant/kitchen/resources"
+	"os/signal"
+	"sync/atomic"
+	"syscall"
 	"time"
+
+	"restaurant/kitchen/pkg"
 
 	"github.com/gorilla/mux"
 )
 
-var runSpeed = time.Second / 10
-var orderCounter = make(chan KitchenOrder, 40)
-var orderCounterFinished = make(chan Response, 40)
+const (
+	runSpeed       = time.Millisecond
+	dinningHallUrl = "http://hall:8882/distribution"
+	LISTENPORT     = ":8881"
+)
 
-type KitchenOrder struct {
-	orderBody         Order
-	receivedTime      time.Time
-	fullyPreparedTime time.Time
-	cookingTime       time.Duration
-	// responseWriter    http.ResponseWriter
+var (
+	orderCounter         = make(chan pkg.KitchenOrder, 40)
+	orderCounterFinished = make(chan pkg.OrderResponse, 40)
+
+	chefLog          *log.Logger
+	eventLog         *log.Logger
+	communicationLog *log.Logger
+	errorLog         *log.Logger
+)
+
+type MyServer struct {
+	http.Server
+	shutdownReq chan bool
+	reqCount    uint32
 }
 
-type Order struct {
-	OrderID    int   `json:"order_id"`
-	TableID    int   `json:"table_id"`
-	WaiterID   int   `json:"waiter_id"`
-	Items      []int `json:"items"`
-	Priority   int   `json:"priority"`
-	MaxWait    int   `json:"max_wait"`
-	PickUpTime int   `json:"pick_up_time"`
-}
-
-type Response struct {
-	OrderID        int   `json:"order_id"`
-	TableID        int   `json:"table_id"`
-	WaiterID       int   `json:"waiter_id"`
-	Items          []int `json:"items"`
-	Priority       int   `json:"priority"`
-	MaxWait        int   `json:"max_wait"`
-	PickUpTime     int   `json:"pick_up_time"`
-	CookingTime    int   `json:"cooking_time"`
-	CookingDetails []struct {
-		Cook_ID int
-		Food_ID int
-	} `json:"cooking_details"`
-}
-
-func workingCook(parameters resources.Cook) {
-	newOrder := <-orderCounter
-	var cookingDetails []struct {
-		Cook_ID int
-		Food_ID int
-	}
-
-	for _, dishNr := range newOrder.orderBody.Items {
-		dish := resources.DishMenu[dishNr-1]
-		time.Sleep(time.Duration(dish.PreparationTime) * runSpeed)
-		receipt := struct {
+func workingCook(parameters pkg.Cook) {
+	for {
+		newOrder := <-orderCounter
+		log.Println(parameters.Name, "took order", newOrder.OrderBody.OrderID, ":", newOrder.OrderBody.Items)
+		var cookingDetails []struct {
 			Cook_ID int
 			Food_ID int
-		}{parameters.Id, dish.Id}
-		cookingDetails = append(cookingDetails, receipt)
+		}
+
+		for _, dishNr := range newOrder.OrderBody.Items {
+			dish := pkg.DishMenu[dishNr-1]
+			time.Sleep(time.Duration(dish.PreparationTime) * runSpeed)
+			receipt := struct {
+				Cook_ID int
+				Food_ID int
+			}{parameters.Id, dish.Id}
+			cookingDetails = append(cookingDetails, receipt)
+		}
+
+		_finishedTime := time.Now()
+		_cookingTime := _finishedTime.Sub(newOrder.ReceivedTime)
+
+		responseBody := pkg.OrderResponse{
+			OrderID:        newOrder.OrderBody.OrderID,
+			TableID:        newOrder.OrderBody.TableID,
+			WaiterID:       newOrder.OrderBody.WaiterID,
+			Items:          newOrder.OrderBody.Items,
+			Priority:       newOrder.OrderBody.Priority,
+			MaxWait:        newOrder.OrderBody.MaxWait,
+			PickUpTime:     newOrder.OrderBody.PickUpTime,
+			CookingTime:    int(_cookingTime / runSpeed),
+			CookingDetails: cookingDetails,
+		}
+
+		log.Println(parameters.Name, "finished cooking order", newOrder.OrderBody.OrderID, ":", newOrder.OrderBody.Items)
+		orderCounterFinished <- responseBody
 	}
-
-	_finishedTime := time.Now()
-	_cookingTime := _finishedTime.Sub(newOrder.receivedTime)
-
-	responseBody := Response{
-		OrderID:        newOrder.orderBody.OrderID,
-		TableID:        newOrder.orderBody.TableID,
-		WaiterID:       newOrder.orderBody.WaiterID,
-		Items:          newOrder.orderBody.Items,
-		Priority:       newOrder.orderBody.Priority,
-		MaxWait:        newOrder.orderBody.MaxWait,
-		PickUpTime:     newOrder.orderBody.PickUpTime,
-		CookingTime:    int(_cookingTime/runSpeed),
-		CookingDetails: cookingDetails,
-	}
-
-	fmt.Fprint(os.Stdout, parameters.Name, " finished cooking ", len(newOrder.orderBody.Items), " dishes, it took ", int64(_cookingTime/runSpeed), " seconds and now they want out of the basement \n")
-	orderCounterFinished <- responseBody
 }
 
-func initializeCooks(cooks []resources.Cook) {
+func initializeCooks(cooks []pkg.Cook) {
 	for _, cook := range cooks {
+		log.Println(cook.Name, "started working!")
 		go workingCook(cook)
 	}
 }
@@ -99,27 +94,132 @@ func receiveRequest(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("Invalid request")
 	}
 
-	var parsedRequest Order
+	var parsedRequest pkg.Order
 	json.Unmarshal(reqBody, &parsedRequest)
 
-	newOrder := &KitchenOrder{orderBody: parsedRequest, receivedTime: _receivedTime}
+	newOrder := &pkg.KitchenOrder{OrderBody: parsedRequest, ReceivedTime: _receivedTime}
+	log.Println("order received, id:", newOrder.OrderBody.OrderID)
+
 	orderCounter <- *newOrder
 	finishedOrder := <-orderCounterFinished
 
+	sendOrderDinningHall(finishedOrder)
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(finishedOrder)
 }
 
-func homePage(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("HomePageAccessed")
+func sendOrderDinningHall(_response pkg.OrderResponse) {
+	payloadBuffer := new(bytes.Buffer)
+	json.NewEncoder(payloadBuffer).Encode(_response)
+
+	req, _ := http.NewRequest("POST", dinningHallUrl, payloadBuffer)
+	client := &http.Client{}
+	client.Do(req)
+
+	log.Println("Order", _response.OrderID, "sent back to the kitchen")
+}
+
+func initLogs() {
+	chefFile, err1 := os.OpenFile("logs/chef_logs.txt", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0666)
+	eventFile, err2 := os.OpenFile("logs/event_logs.txt", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0666)
+	communicationFile, err3 := os.OpenFile("logs/communication_logs.txt", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0666)
+	errorFile, err4 := os.OpenFile("logs/error_logs.txt", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0666)
+
+	if err1 != nil || err2 != nil || err3 != nil || err4 != nil {
+		log.Fatal(err1, err2, err3, err4)
+	}
+
+	chefLog = log.New(chefFile, "Chef: ", log.Ltime|log.Lmicroseconds|log.Lshortfile)
+	eventLog = log.New(eventFile, "Event: ", log.Ltime|log.Lmicroseconds|log.Lshortfile)
+	communicationLog = log.New(communicationFile, "Communication: ", log.Ltime|log.Lmicroseconds|log.Lshortfile)
+	errorLog = log.New(errorFile, "error: ", log.Ltime|log.Lmicroseconds|log.Lshortfile)
+}
+
+func NewServer() *MyServer {
+	//create server
+	s := &MyServer{
+		Server: http.Server{
+			Addr:         LISTENPORT,
+			ReadTimeout:  10 * time.Second,
+			WriteTimeout: 10 * time.Second,
+		},
+		shutdownReq: make(chan bool),
+	}
+
+	router := mux.NewRouter()
+
+	//register handlers
+	router.HandleFunc("/shutdown", s.ShutdownHandler)
+	router.HandleFunc("/order", receiveRequest).Methods("POST")
+
+	//set http server handler
+	s.Handler = router
+
+	return s
+}
+
+func (s *MyServer) WaitShutdown() {
+	irqSig := make(chan os.Signal, 1)
+	signal.Notify(irqSig, syscall.SIGINT, syscall.SIGTERM)
+
+	//Wait interrupt or shutdown request through /shutdown
+	select {
+	case sig := <-irqSig:
+		log.Printf("Shutdown request (signal: %v)", sig)
+	case sig := <-s.shutdownReq:
+		log.Printf("Shutdown request (/shutdown %v)", sig)
+	}
+
+	log.Printf("Stoping http server ...")
+
+	//Create shutdown context with 10 second timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	//shutdown the server
+	err := s.Shutdown(ctx)
+	if err != nil {
+		log.Printf("Shutdown request error: %v", err)
+	}
+}
+
+func (s *MyServer) ShutdownHandler(w http.ResponseWriter, r *http.Request) {
+	w.Write([]byte("Shutdown server"))
+
+	//Do nothing if shutdown request already issued
+	//if s.reqCount == 0 then set to 1, return true otherwise false
+	if !atomic.CompareAndSwapUint32(&s.reqCount, 0, 1) {
+		log.Printf("Shutdown through API call in progress...")
+		return
+	}
+
+	go func() {
+		s.shutdownReq <- true
+	}()
+}
+
+func startServer() {
+	server := NewServer()
+
+	done := make(chan bool)
+	go func() {
+		err := server.ListenAndServe()
+		if err != nil {
+			log.Printf("Listen and serve: %v", err)
+		}
+		done <- true
+	}()
+
+	//wait shutdown
+	server.WaitShutdown()
+
+	<-done
+	log.Printf("DONE!")
 }
 
 func main() {
-	initializeCooks(resources.Staff)
+	// initLogs()
+	initializeCooks(pkg.Staff)
 
-	router := mux.NewRouter().StrictSlash(true)
-	router.HandleFunc("/", homePage)
-	router.HandleFunc("/orders", receiveRequest).Methods("POST")
-
-	log.Fatal(http.ListenAndServe(":8086", router))
+	startServer()
 }
