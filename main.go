@@ -44,7 +44,6 @@ type MyServer struct {
 func workingCook(parameters pkg.Cook) {
 	for {
 		newOrder := <-orderCounter
-		log.Println(parameters.Name, "took order", newOrder.OrderBody.OrderID, ":", newOrder.OrderBody.Items)
 		var cookingDetails []struct {
 			Cook_ID int
 			Food_ID int
@@ -75,7 +74,7 @@ func workingCook(parameters pkg.Cook) {
 			CookingDetails: cookingDetails,
 		}
 
-		log.Println(parameters.Name, "finished cooking order", newOrder.OrderBody.OrderID, ":", newOrder.OrderBody.Items)
+		chefLog.Println(parameters.Name, "Finished order:", newOrder.OrderBody.OrderID, ":", newOrder.OrderBody.Items, "Time:", _cookingTime)
 		orderCounterFinished <- responseBody
 	}
 }
@@ -98,7 +97,7 @@ func receiveRequest(w http.ResponseWriter, r *http.Request) {
 	json.Unmarshal(reqBody, &parsedRequest)
 
 	newOrder := &pkg.KitchenOrder{OrderBody: parsedRequest, ReceivedTime: _receivedTime}
-	log.Println("order received, id:", newOrder.OrderBody.OrderID)
+	communicationLog.Println("Order received:", newOrder.OrderBody.OrderID)
 
 	orderCounter <- *newOrder
 	finishedOrder := <-orderCounterFinished
@@ -115,24 +114,23 @@ func sendOrderDinningHall(_response pkg.OrderResponse) {
 	req, _ := http.NewRequest("POST", dinningHallUrl, payloadBuffer)
 	client := &http.Client{}
 	client.Do(req)
-
-	log.Println("Order", _response.OrderID, "sent back to the kitchen")
+  communicationLog.Println("Order send:", _response.OrderID)
 }
 
 func initLogs() {
-	chefFile, err1 := os.OpenFile("logs/chef_logs.txt", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0666)
-	eventFile, err2 := os.OpenFile("logs/event_logs.txt", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0666)
-	communicationFile, err3 := os.OpenFile("logs/communication_logs.txt", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0666)
-	errorFile, err4 := os.OpenFile("logs/error_logs.txt", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0666)
+	// chefFile, err1 := os.OpenFile("logs/chef_logs.txt", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0666)
+	// eventFile, err2 := os.OpenFile("logs/event_logs.txt", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0666)
+	// communicationFile, err3 := os.OpenFile("logs/communication_logs.txt", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0666)
+	// errorFile, err4 := os.OpenFile("logs/error_logs.txt", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0666)
 
-	if err1 != nil || err2 != nil || err3 != nil || err4 != nil {
-		log.Fatal(err1, err2, err3, err4)
-	}
+	// if err1 != nil || err2 != nil || err3 != nil || err4 != nil {
+	// 	log.Fatal(err1, err2, err3, err4)
+	// }
 
-	chefLog = log.New(chefFile, "Chef: ", log.Ltime|log.Lmicroseconds|log.Lshortfile)
-	eventLog = log.New(eventFile, "Event: ", log.Ltime|log.Lmicroseconds|log.Lshortfile)
-	communicationLog = log.New(communicationFile, "Communication: ", log.Ltime|log.Lmicroseconds|log.Lshortfile)
-	errorLog = log.New(errorFile, "error: ", log.Ltime|log.Lmicroseconds|log.Lshortfile)
+	chefLog = log.New(log.Writer(), "Chef: ", log.Ltime|log.Lmicroseconds|log.Lshortfile)
+	eventLog = log.New(log.Writer(), "Event: ", log.Ltime|log.Lmicroseconds|log.Lshortfile)
+	communicationLog = log.New(log.Writer(), "Communication: ", log.Ltime|log.Lmicroseconds|log.Lshortfile)
+	errorLog = log.New(log.Writer(), "Error: ", log.Ltime|log.Lmicroseconds|log.Lshortfile)
 }
 
 func NewServer() *MyServer {
@@ -173,7 +171,7 @@ func (s *MyServer) WaitShutdown() {
 	log.Printf("Stoping http server ...")
 
 	//Create shutdown context with 10 second timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+  ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
 	//shutdown the server
@@ -218,7 +216,7 @@ func startServer() {
 }
 
 func main() {
-	// initLogs()
+	initLogs()
 	initializeCooks(pkg.Staff)
 
 	startServer()
