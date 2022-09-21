@@ -1,0 +1,15 @@
+version: '2.10.2'
+services:
+  kitchen:
+    container_name: kitchen
+    # build: ./
+    image: kitchen-image
+    ports: 
+      - "8881:8881"
+  hall:
+    container_name: hall
+    image: hall-image
+    ports: 
+      - "8882:8881"
+    depends_on:
+      - kitchen
