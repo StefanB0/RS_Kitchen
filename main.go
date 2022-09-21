@@ -84,7 +84,7 @@ func initializeCooks(cooks []pkg.Cook) {
 		log.Println(cook.Name, "started working!")
 		go workingCook(cook)
 	}
-}``
+}
 
 func receiveRequest(w http.ResponseWriter, r *http.Request) {
 	_receivedTime := time.Now()
