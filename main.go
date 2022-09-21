@@ -114,8 +114,7 @@ func sendOrderDinningHall(_response pkg.OrderResponse) {
 	req, _ := http.NewRequest("POST", dinningHallUrl, payloadBuffer)
 	client := &http.Client{}
 	client.Do(req)
-
-	communicationLog.Println("Order send:", _response.OrderID)
+  communicationLog.Println("Order send:", _response.OrderID)
 }
 
 func initLogs() {
@@ -172,7 +171,7 @@ func (s *MyServer) WaitShutdown() {
 	log.Printf("Stoping http server ...")
 
 	//Create shutdown context with 10 second timeout
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+  ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
 	//shutdown the server
