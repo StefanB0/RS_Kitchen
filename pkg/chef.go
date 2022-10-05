@@ -1,7 +1,10 @@
 package pkg
 
 import (
-	"sync"
+	"encoding/json"
+	"io/ioutil"
+	"log"
+	"os"
 	"time"
 )
 
@@ -11,58 +14,74 @@ type Cook struct {
 	Proficiency int
 	Name        string
 	Catchphrase string
-	fCounter    int
+
+	runspeed time.Duration
+
+	dCounter          chan struct{}
+	inputDishChannel  chan KitchenDish
+	finishDishChannel chan KitchenDish
+	managerContact    chan *Cook
 }
 
-type PendingList struct {
-	DishList []KitchenDish
-	sync.Mutex
+
+
+func (c *Cook) Start(_runspeed time.Duration, _finishdishChannel chan KitchenDish, _managerContact chan *Cook) {
+	c.runspeed = _runspeed
+	c.finishDishChannel = _finishdishChannel
+	c.managerContact = _managerContact
+
+	c.inputDishChannel = make(chan KitchenDish, c.Proficiency)
+	c.dCounter = make(chan struct{}, c.Proficiency)
+
+	log.Println(c.Name, "started working!")
+	go c.work()
 }
 
-func (c *Cook) work(pendingL *PendingList, finishedCh chan KitchenDish, runSpeed time.Duration) {
+func (c *Cook) work() {
 	for {
-		if c.fCounter < c.Proficiency {
-			c.fCounter++
-			kdish := c.ChooseFood(pendingL)
-			if kdish.index != 0 {
-				go c.CookFood(kdish, runSpeed, finishedCh)
-			} else {
-				c.fCounter--
-			}
+		if len(c.dCounter) < c.Proficiency {
+			c.dCounter <- struct{}{}
+			go func() {
+				kDish := c.getDish()
+				c.cookDish(kDish)
+			}()
 		}
 	}
 }
 
-func (c *Cook) ChooseFood(pendingL *PendingList) KitchenDish {
-	pendingL.Lock()
-	defer pendingL.Unlock()
+func (c *Cook) getDish() KitchenDish {
+	cp := c
+	c.managerContact <- cp
 
-	for i := range pendingL.DishList {
-		if c.CheckComplexity(pendingL.DishList[i]) {
-			pendingL.DishList = removeDish(pendingL.DishList, i)
-			return pendingL.DishList[i]
-		}
+	newDish := <-c.inputDishChannel
+	return newDish
+}
+
+func (c *Cook) cookDish(kdish KitchenDish) {
+	time.Sleep(c.runspeed * time.Duration(kdish.dish.PreparationTime))
+	c.ReturnDish(kdish)
+
+	<-c.dCounter
+}
+
+func (c *Cook) ReturnDish(kdish KitchenDish) {
+	c.finishDishChannel <- kdish
+}
+
+func ReadCooks(path string) []Cook {
+
+	jsonfile, err := os.Open(path)
+	defer jsonfile.Close()
+
+	if err != nil {
+		log.Println(err)
 	}
-	return KitchenDish{}
+
+	bytevalue, _ := ioutil.ReadAll(jsonfile)
+	newStaff := []Cook{}
+	json.Unmarshal(bytevalue, &newStaff)
+
+	return newStaff
+
 }
 
-func (c *Cook) CheckComplexity(d KitchenDish) bool {
-	switch {
-	case d.Complexity > c.Rank:
-		return false
-	case d.Complexity < c.Rank-1:
-		return false
-	}
-
-	return true
-}
-
-func (c *Cook) CookFood(kdish KitchenDish, runSpeed time.Duration, finishedCh chan KitchenDish) {
-	time.Sleep(runSpeed * time.Duration(kdish.PreparationTime))
-	c.fCounter--
-	c.ReturnDish(kdish, finishedCh)
-}
-
-func (c *Cook) ReturnDish(kdish KitchenDish, finishedCh chan KitchenDish) {
-	finishedCh <- kdish
-}
