@@ -9,3 +9,6 @@
 
 #ignore local logs
 /logs/
+
+.vscode
+*.txt
