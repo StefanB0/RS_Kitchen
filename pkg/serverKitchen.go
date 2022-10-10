@@ -33,7 +33,7 @@ func StartServer(m *Manager, listenPort string) {
 		}
 		done <- true
 	}()
-	
+
 	//wait shutdown
 	server.WaitShutdown()
 
@@ -41,7 +41,7 @@ func StartServer(m *Manager, listenPort string) {
 	log.Println("DONE!")
 }
 
-func (s *MyServer)receiveRequest(w http.ResponseWriter, r *http.Request) {
+func (s *MyServer) receiveRequest(w http.ResponseWriter, r *http.Request) {
 	reqBody, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		log.Println("Invalid request")
@@ -61,7 +61,7 @@ func NewServer(m *Manager, listenPort string) *MyServer {
 			WriteTimeout: 10 * time.Second,
 		},
 		shutdownReq: make(chan bool),
-		manager: m,
+		manager:     m,
 	}
 
 	router := mux.NewRouter()

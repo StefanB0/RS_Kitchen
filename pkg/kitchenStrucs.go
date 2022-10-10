@@ -24,8 +24,9 @@ type KitchenDish struct {
 	priority int
 	cookID   int
 	dish     Dish
+	progress int
 	parent   *KitchenOrder
-	cook *Cook
+	cook     *Cook
 }
 
 type Dish struct {
@@ -68,10 +69,30 @@ func sortDishComplexity(list []KitchenDish) []KitchenDish {
 	return list
 }
 
+func sortDishPriority(list []KitchenDish) []KitchenDish {
+	for i := 0; i < len(list); i++ {
+		for j := i; j > 0 && list[j-1].priority > list[j].priority; j-- {
+			list[j], list[j-1] = list[j-1], list[j]
+		}
+	}
+	return list
+}
+
 func convertDishes(dishes []int, menu []Dish, _parent *KitchenOrder) []KitchenDish {
 	kDishes := []KitchenDish{}
 	for _, dID := range dishes {
-		kDishes = append(kDishes, KitchenDish{parent: _parent, dish: menu[dID-1], priority: _parent.priority})
+		kDishes = append(kDishes, KitchenDish{parent: _parent, dish: menu[dID], priority: _parent.priority, progress: 0})
 	}
 	return kDishes
+}
+
+func getOptimalAparatus(aparatusList []*CookingAparatus, aType string) *CookingAparatus {
+	id := 0
+	minLoad := DISHBUFFER + 1
+	for i := 0; i < len(aparatusList); i++ {
+		if aparatusList[i].ApType == aType && aparatusList[i].ViewHoldSize() < minLoad {
+			id = i
+		}
+	}
+	return aparatusList[id]
 }

@@ -31,3 +31,4 @@ func (c *Counter) Value() int {
 func removeDish(s []KitchenDish, i int) []KitchenDish {
 	return append(s[:i], s[i+1:]...)
 }
+

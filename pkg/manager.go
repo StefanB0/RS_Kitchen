@@ -95,7 +95,7 @@ func (m *Manager) sendDishCook() {
 
 		if !satisfied {
 			m.pendingDish <- struct{}{}
-			go func(){
+			go func() {
 				time.Sleep(m.runspeed)
 				m.contactChannel <- cook
 			}()
@@ -112,15 +112,15 @@ func (m *Manager) receiveFinishedDishes() {
 		}{kdish.cookID, kdish.dish.Id})
 		kdish.parent.finDishes++
 		if kdish.parent.finDishes == len(kdish.parent.OrderBody.Items) {
-			kdish.parent.CookingTime = int(time.Now().Sub(kdish.parent.ReceivedTime) / m.runspeed)
-			log.Println("Order", kdish.parent.OrderBody.OrderID, "fully finished.", kdish.parent.OrderBody.Items)
+			kdish.parent.CookingTime = int(time.Now().Round(m.runspeed).Sub(kdish.parent.ReceivedTime) / m.runspeed)
+			log.Println("KOF:", kdish.parent.OrderBody.OrderID)
 			m.sendResponseDinningHall(compileResponse(*kdish.parent))
 		}
 	}
 }
 
 func (m *Manager) sendResponseDinningHall(_response OrderResponse) {
-	log.Println("Order sent back:", _response.OrderID)
+	log.Println("KOS", _response.OrderID)
 
 	payloadBuffer := new(bytes.Buffer)
 	json.NewEncoder(payloadBuffer).Encode(_response)
@@ -143,6 +143,6 @@ func (m *Manager) sortDishes() {
 }
 
 func (m *Manager) addOrder(parsedOrder Order) {
-	log.Println("Order", parsedOrder.OrderID, "received")
+	log.Println("KOR", parsedOrder.OrderID)
 	m.orderChannel <- parsedOrder
 }
