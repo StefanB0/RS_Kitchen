@@ -21,19 +21,18 @@ type Cook struct {
 	inputDishChannel  chan KitchenDish
 	finishDishChannel chan KitchenDish
 	managerContact    chan *Cook
+	aparatusList      []*CookingAparatus
 }
 
-
-
-func (c *Cook) Start(_runspeed time.Duration, _finishdishChannel chan KitchenDish, _managerContact chan *Cook) {
+func (c *Cook) Start(_runspeed time.Duration, _finishdishChannel chan KitchenDish, _managerContact chan *Cook, _aparatusList []*CookingAparatus) {
 	c.runspeed = _runspeed
 	c.finishDishChannel = _finishdishChannel
 	c.managerContact = _managerContact
+	c.aparatusList = _aparatusList
 
 	c.inputDishChannel = make(chan KitchenDish, c.Proficiency)
 	c.dCounter = make(chan struct{}, c.Proficiency)
 
-	log.Println(c.Name, "started working!")
 	go c.work()
 }
 
@@ -54,12 +53,20 @@ func (c *Cook) getDish() KitchenDish {
 	c.managerContact <- cp
 
 	newDish := <-c.inputDishChannel
+	newDish.cook = c
 	return newDish
 }
 
 func (c *Cook) cookDish(kdish KitchenDish) {
-	time.Sleep(c.runspeed * time.Duration(kdish.dish.PreparationTime))
-	c.ReturnDish(kdish)
+	if kdish.dish.CookingApparatus == "null" {
+		for i := 0; i < kdish.dish.PreparationTime; i++ {
+			time.Sleep(c.runspeed)
+		}
+		c.ReturnDish(kdish)
+	} else {
+		cookingAparatus := getOptimalAparatus(c.aparatusList, kdish.dish.CookingApparatus)
+		cookingAparatus.addToHold(kdish)
+	}
 
 	<-c.dCounter
 }
